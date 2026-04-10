@@ -365,6 +365,53 @@
       z-index: 999;
       pointer-events: none;
     }
+
+    /* Game Modal */
+    .game-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: rgba(253,244,248,0.88);
+      backdrop-filter: blur(12px);
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+    .game-modal.open { display: flex; }
+
+    .game-wrap {
+      position: relative;
+      border-radius: 24px;
+      overflow: hidden;
+      border: 2px solid rgba(233,30,99,0.2);
+      box-shadow: 0 20px 60px rgba(233,30,99,0.18), 0 4px 20px rgba(0,0,0,0.1);
+    }
+
+    #gameCanvas { display: block; }
+
+    .game-close {
+      position: absolute;
+      top: 12px; right: 12px;
+      width: 36px; height: 36px;
+      background: rgba(255,255,255,0.85);
+      border: 1px solid rgba(233,30,99,0.2);
+      border-radius: 50%;
+      color: #c2185b;
+      font-size: 1.1rem;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 10;
+      transition: background 0.2s;
+    }
+    .game-close:hover { background: white; }
+
+    .game-hint {
+      margin-top: 14px;
+      color: #bdbdbd;
+      font-size: 0.8rem;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -375,6 +422,15 @@
   <div class="orb orb-3"></div>
 
   <canvas id="confetti"></canvas>
+
+  <!-- Game Modal -->
+  <div class="game-modal" id="gameModal">
+    <div class="game-wrap">
+      <button class="game-close" onclick="closeGame()">×</button>
+      <canvas id="gameCanvas" width="320" height="480"></canvas>
+    </div>
+    <div class="game-hint">Nhấn Space / Click / Chạm để bơi</div>
+  </div>
 
   <div class="card">
     <div class="brand">
@@ -408,6 +464,11 @@
       <button class="btn btn-gift" onclick="launchConfetti()">
         <span class="btn-icon">🎁</span>
         Tặng quà
+      </button>
+
+      <button class="btn" style="background:rgba(233,30,99,0.07);border:1px solid rgba(233,30,99,0.18);color:#c2185b;" onclick="openGame()">
+        <span class="btn-icon">🐟</span>
+        Trò chơi
       </button>
     </div>
 
@@ -571,6 +632,280 @@
 
       if (!running) { running = true; loop(); }
     }
+
+    // ===== FLAPPY FISH GAME =====
+    const gc = document.getElementById('gameCanvas');
+    const gx = gc.getContext('2d');
+    const GW = gc.width, GH = gc.height;
+
+    const FISH_R = 15, PIPE_W = 50, PIPE_GAP = 148, PIPE_SPEED = 2.2, GRAVITY = 0.36, FLAP = -7;
+    const FC = { pipe: '#26a69a', pipeDark: '#00796b', pipeCap: '#80cbc4', fish: '#ff7043', fishBelly: '#ffccbc', fishFin: '#ff5722', bubble: 'rgba(255,255,255,0.5)' };
+
+    let fish, seaweeds, score, best, gameState, gLoop, pipeTimer;
+    let bubbles = [];
+
+    function resetGame() {
+      fish = { x: 80, y: GH / 2, vy: 0, angle: 0 };
+      seaweeds = [];
+      bubbles = [];
+      score = 0;
+      if (best === undefined) best = 0;
+      gameState = 'ready';
+      pipeTimer = 0;
+      // pre-spawn some bubbles
+      for (let i = 0; i < 12; i++) spawnBubble(true);
+    }
+
+    function spawnBubble(anywhere) {
+      bubbles.push({
+        x: Math.random() * GW,
+        y: anywhere ? Math.random() * GH : GH + 10,
+        r: Math.random() * 4 + 2,
+        vy: -(Math.random() * 0.6 + 0.3),
+        alpha: Math.random() * 0.5 + 0.3
+      });
+    }
+
+    function spawnPipe() {
+      const top = 70 + Math.random() * (GH - PIPE_GAP - 120);
+      seaweeds.push({ x: GW, top, bottom: top + PIPE_GAP, passed: false });
+    }
+
+    function flapFish() {
+      if (gameState === 'dead') { resetGame(); return; }
+      if (gameState === 'ready') gameState = 'playing';
+      fish.vy = FLAP;
+    }
+
+    function drawFish() {
+      gx.save();
+      gx.translate(fish.x, fish.y);
+      const angle = Math.min(Math.max(fish.vy * 0.055, -0.45), 1.1);
+      gx.rotate(angle);
+
+      // Tail
+      gx.fillStyle = FC.fishFin;
+      gx.beginPath();
+      gx.moveTo(-FISH_R + 2, 0);
+      gx.lineTo(-FISH_R - 10, -9);
+      gx.lineTo(-FISH_R - 10, 9);
+      gx.closePath();
+      gx.fill();
+
+      // Body
+      gx.fillStyle = FC.fish;
+      gx.shadowBlur = 12; gx.shadowColor = '#ff8a65';
+      gx.beginPath();
+      gx.ellipse(0, 0, FISH_R + 2, FISH_R - 3, 0, 0, Math.PI * 2);
+      gx.fill();
+      gx.shadowBlur = 0;
+
+      // Belly stripe
+      gx.fillStyle = FC.fishBelly;
+      gx.beginPath();
+      gx.ellipse(2, 3, FISH_R - 4, FISH_R - 8, 0, 0, Math.PI * 2);
+      gx.fill();
+
+      // Dorsal fin
+      gx.fillStyle = FC.fishFin;
+      gx.beginPath();
+      gx.moveTo(-4, -FISH_R + 3);
+      gx.lineTo(4, -FISH_R + 3);
+      gx.lineTo(1, -FISH_R - 6);
+      gx.closePath();
+      gx.fill();
+
+      // Eye
+      gx.fillStyle = '#37474f';
+      gx.beginPath();
+      gx.arc(FISH_R - 5, -4, 4, 0, Math.PI * 2);
+      gx.fill();
+      gx.fillStyle = '#fff';
+      gx.beginPath();
+      gx.arc(FISH_R - 4, -5, 1.5, 0, Math.PI * 2);
+      gx.fill();
+
+      // Mouth
+      gx.strokeStyle = '#bf360c';
+      gx.lineWidth = 1.5;
+      gx.beginPath();
+      gx.arc(FISH_R + 1, 2, 4, 0.2, 1.0);
+      gx.stroke();
+
+      gx.restore();
+    }
+
+    function drawSeaweed(p) {
+      // Top seaweed (grows down)
+      const grad1 = gx.createLinearGradient(p.x, 0, p.x + PIPE_W, 0);
+      grad1.addColorStop(0, FC.pipe); grad1.addColorStop(1, FC.pipeDark);
+      gx.fillStyle = grad1;
+      gx.fillRect(p.x, 0, PIPE_W, p.top);
+      // Top cap (coral)
+      gx.fillStyle = FC.pipeCap;
+      gx.beginPath();
+      gx.roundRect(p.x - 5, p.top - 20, PIPE_W + 10, 20, [8, 8, 0, 0]);
+      gx.fill();
+      // Coral bumps
+      gx.fillStyle = '#e91e63';
+      for (let i = 0; i < 3; i++) {
+        gx.beginPath();
+        gx.arc(p.x + 10 + i * 15, p.top - 20, 5, Math.PI, 0);
+        gx.fill();
+      }
+
+      // Bottom seaweed (grows up)
+      const grad2 = gx.createLinearGradient(p.x, 0, p.x + PIPE_W, 0);
+      grad2.addColorStop(0, FC.pipe); grad2.addColorStop(1, FC.pipeDark);
+      gx.fillStyle = grad2;
+      gx.fillRect(p.x, p.bottom, PIPE_W, GH - p.bottom);
+      // Bottom cap
+      gx.fillStyle = FC.pipeCap;
+      gx.beginPath();
+      gx.roundRect(p.x - 5, p.bottom, PIPE_W + 10, 20, [0, 0, 8, 8]);
+      gx.fill();
+      // Coral bumps bottom
+      gx.fillStyle = '#e91e63';
+      for (let i = 0; i < 3; i++) {
+        gx.beginPath();
+        gx.arc(p.x + 10 + i * 15, p.bottom + 20, 5, 0, Math.PI);
+        gx.fill();
+      }
+    }
+
+    function drawBg() {
+      // Underwater gradient
+      const grad = gx.createLinearGradient(0, 0, 0, GH);
+      grad.addColorStop(0, '#e0f7fa');
+      grad.addColorStop(0.5, '#b2ebf2');
+      grad.addColorStop(1, '#80deea');
+      gx.fillStyle = grad;
+      gx.fillRect(0, 0, GW, GH);
+
+      // Light rays
+      gx.save();
+      for (let i = 0; i < 5; i++) {
+        gx.globalAlpha = 0.06;
+        gx.fillStyle = '#fff';
+        gx.beginPath();
+        gx.moveTo(40 + i * 60, 0);
+        gx.lineTo(20 + i * 60, GH);
+        gx.lineTo(55 + i * 60, GH);
+        gx.lineTo(70 + i * 60, 0);
+        gx.fill();
+      }
+      gx.restore();
+
+      // Bubbles
+      bubbles.forEach(b => {
+        gx.save();
+        gx.globalAlpha = b.alpha;
+        gx.strokeStyle = 'rgba(255,255,255,0.7)';
+        gx.lineWidth = 1;
+        gx.beginPath();
+        gx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        gx.stroke();
+        // Shine
+        gx.fillStyle = 'rgba(255,255,255,0.3)';
+        gx.beginPath();
+        gx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.4, 0, Math.PI * 2);
+        gx.fill();
+        gx.restore();
+      });
+
+      // Sandy bottom
+      gx.fillStyle = '#ffe0b2';
+      gx.fillRect(0, GH - 8, GW, 8);
+    }
+
+    function drawUI() {
+      gx.font = 'bold 36px Inter, sans-serif';
+      gx.textAlign = 'center';
+      gx.fillStyle = 'rgba(0,0,0,0.1)';
+      gx.fillText(score, GW/2 + 2, 62);
+      gx.fillStyle = '#00695c';
+      gx.shadowBlur = 0;
+      gx.fillText(score, GW/2, 60);
+
+      if (gameState === 'ready') {
+        gx.fillStyle = 'rgba(255,255,255,0.75)';
+        gx.beginPath();
+        gx.roundRect(GW/2 - 110, GH/2 - 44, 220, 88, 18);
+        gx.fill();
+        gx.font = 'bold 18px Inter, sans-serif';
+        gx.fillStyle = '#00796b';
+        gx.fillText('🐟 Nhấn để bơi!', GW/2, GH/2 + 8);
+      }
+
+      if (gameState === 'dead') {
+        gx.fillStyle = 'rgba(255,255,255,0.82)';
+        gx.beginPath();
+        gx.roundRect(GW/2 - 115, GH/2 - 72, 230, 148, 20);
+        gx.fill();
+        gx.font = 'bold 24px Inter, sans-serif';
+        gx.fillStyle = '#e91e63';
+        gx.fillText('Cá bị mắc cạn! 🐟', GW/2, GH/2 - 28);
+        gx.font = '15px Inter, sans-serif';
+        gx.fillStyle = '#555';
+        gx.fillText(`Điểm: ${score}   Cao nhất: ${best}`, GW/2, GH/2 + 8);
+        gx.font = 'bold 14px Inter, sans-serif';
+        gx.fillStyle = '#00796b';
+        gx.fillText('Nhấn để bơi lại', GW/2, GH/2 + 46);
+      }
+    }
+
+    function gameFrame() {
+      // Update bubbles
+      if (Math.random() < 0.04) spawnBubble(false);
+      bubbles.forEach(b => { b.y += b.vy; });
+      bubbles = bubbles.filter(b => b.y + b.r > 0);
+
+      drawBg();
+
+      if (gameState === 'playing') {
+        fish.vy += GRAVITY;
+        fish.y += fish.vy;
+
+        pipeTimer++;
+        if (pipeTimer > 95) { spawnPipe(); pipeTimer = 0; }
+        seaweeds.forEach(p => p.x -= PIPE_SPEED);
+        seaweeds = seaweeds.filter(p => p.x + PIPE_W > 0);
+
+        seaweeds.forEach(p => {
+          if (!p.passed && p.x + PIPE_W < fish.x) { p.passed = true; score++; if (score > best) best = score; }
+        });
+
+        const hit = fish.y - FISH_R < 0 || fish.y + FISH_R > GH - 8 ||
+          seaweeds.some(p => fish.x + FISH_R - 6 > p.x && fish.x - FISH_R + 6 < p.x + PIPE_W &&
+            (fish.y - FISH_R + 4 < p.top || fish.y + FISH_R - 4 > p.bottom));
+        if (hit) gameState = 'dead';
+      }
+
+      seaweeds.forEach(drawSeaweed);
+      drawFish();
+      drawUI();
+      gLoop = requestAnimationFrame(gameFrame);
+    }
+
+    function openGame() {
+      document.getElementById('gameModal').classList.add('open');
+      resetGame();
+      if (gLoop) cancelAnimationFrame(gLoop);
+      gameFrame();
+    }
+
+    function closeGame() {
+      document.getElementById('gameModal').classList.remove('open');
+      if (gLoop) cancelAnimationFrame(gLoop);
+    }
+
+    gc.addEventListener('click', flapFish);
+    gc.addEventListener('touchstart', e => { e.preventDefault(); flapFish(); }, { passive: false });
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space' && document.getElementById('gameModal').classList.contains('open')) {
+        e.preventDefault(); flapFish();
+      }
+    });
 
     // ===== TOGGLE MESSAGE FORM =====
     function toggleMsg() {
